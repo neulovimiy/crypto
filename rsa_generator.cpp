@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <cstring>
+#include <openssl/rand.h>
 
 void generateRSAKeys(const std::string& entropyData, const std::string& filename) {
     if (entropyData.empty()) {
@@ -13,13 +14,19 @@ void generateRSAKeys(const std::string& entropyData, const std::string& filename
         return;
     }
 
+    RAND_add(entropyData.data(), entropyData.size(), entropyData.size() * 0.5);
+
     RSA *rsa = RSA_new();
     BIGNUM *bn = BN_new();
 
-    // Используем первые символы entropyData для инициализации BIGNUM
-    std::string seed(entropyData.begin(), entropyData.begin() + std::min(entropyData.size(), size_t(8)));
-    BN_bin2bn(reinterpret_cast<const unsigned char*>(seed.data()), seed.size(), bn);
+    // Use a fixed public exponent (65537)
+    if (BN_set_word(bn, RSA_F4) != 1) {
+        std::cerr << "Ошибка установки публичного экспонента." << std::endl;
+        BN_free(bn);
+        return;
+    }
 
+    // Generate RSA keys
     if (RSA_generate_key_ex(rsa, 2048, bn, NULL) != 1) {
         unsigned long err = ERR_get_error();
         char err_buf[256];
@@ -30,14 +37,18 @@ void generateRSAKeys(const std::string& entropyData, const std::string& filename
         return;
     }
 
-    // Сохранение публичного ключа в файл
+    // Save public key
     BIO *pub = BIO_new_file((filename + "_pub.pem").c_str(), "w");
-    PEM_write_bio_RSAPublicKey(pub, rsa);
+    if (!PEM_write_bio_RSAPublicKey(pub, rsa)) {
+        std::cerr << "Ошибка записи публичного ключа." << std::endl;
+    }
     BIO_free_all(pub);
 
-    // Сохранение приватного ключа в файл
+    // Save private key
     BIO *priv = BIO_new_file((filename + "_priv.pem").c_str(), "w");
-    PEM_write_bio_RSAPrivateKey(priv, rsa, NULL, NULL, 0, NULL, NULL);
+    if (!PEM_write_bio_RSAPrivateKey(priv, rsa, NULL, NULL, 0, NULL, NULL)) {
+        std::cerr << "Ошибка записи приватного ключа." << std::endl;
+    }
     BIO_free_all(priv);
 
     BN_free(bn);
