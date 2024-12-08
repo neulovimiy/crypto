@@ -4,12 +4,15 @@
 #include <fstream>
 #include <iostream>
 
-void generateAESKeys(const std::string& keyFile, const std::string& ivFile) {
+void generateAESKeys(const std::string& entropyData, const std::string& keyFile, const std::string& ivFile) {
     const int keyLength = 32; // 256 бит
     const int ivLength = 16;  // 128 бит
 
     unsigned char key[keyLength];
     unsigned char iv[ivLength];
+
+    // Добавляем собранную энтропию в генератор случайных чисел
+    RAND_add(entropyData.data(), entropyData.size(), 0.0);
 
     // Генерация случайных значений
     if (!RAND_bytes(key, keyLength) || !RAND_bytes(iv, ivLength)) {
@@ -37,6 +40,7 @@ void generateAESKeys(const std::string& keyFile, const std::string& ivFile) {
 
     std::cout << "AES ключ сохранен в " << keyFile << ", IV сохранен в " << ivFile << std::endl;
 }
+
 std::vector<unsigned char> aesEncrypt(const std::string& plaintext, const std::string& keyFile) {
     std::ifstream file(keyFile, std::ios::binary);
     if (!file) {

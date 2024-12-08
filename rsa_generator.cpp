@@ -7,8 +7,9 @@
 #include <string>
 #include <cstring>
 #include <openssl/rand.h>
+#include <algorithm> // Для std::min
 
-void generateRSAKeys(const std::string& entropyData, const std::string& filename) {
+void generateRSAKeys(const std::string& entropyData, const std::string& publicKeyFilename, const std::string& privateKeyFilename) {
     if (entropyData.empty()) {
         std::cerr << "Ошибка: недостаточно энтропии." << std::endl;
         return;
@@ -38,14 +39,14 @@ void generateRSAKeys(const std::string& entropyData, const std::string& filename
     }
 
     // Save public key
-    BIO *pub = BIO_new_file((filename + "_pub.pem").c_str(), "w");
+    BIO *pub = BIO_new_file(publicKeyFilename.c_str(), "w");
     if (!PEM_write_bio_RSAPublicKey(pub, rsa)) {
         std::cerr << "Ошибка записи публичного ключа." << std::endl;
     }
     BIO_free_all(pub);
 
     // Save private key
-    BIO *priv = BIO_new_file((filename + "_priv.pem").c_str(), "w");
+    BIO *priv = BIO_new_file(privateKeyFilename.c_str(), "w");
     if (!PEM_write_bio_RSAPrivateKey(priv, rsa, NULL, NULL, 0, NULL, NULL)) {
         std::cerr << "Ошибка записи приватного ключа." << std::endl;
     }
@@ -55,7 +56,7 @@ void generateRSAKeys(const std::string& entropyData, const std::string& filename
     RSA_free(rsa);
 }
 
-std::vector<unsigned char> rsaEncryptBinary(const std::string& message, const std::string& publicKeyFilename) {
+std::vector<unsigned char> rsaEncryptFile(const std::vector<unsigned char>& message, const std::string& publicKeyFilename) {
     FILE *fp = fopen(publicKeyFilename.c_str(), "r");
     if (fp == NULL) {
         std::cerr << "Ошибка открытия публичного ключа: " << publicKeyFilename << std::endl;
@@ -66,28 +67,38 @@ std::vector<unsigned char> rsaEncryptBinary(const std::string& message, const st
     fclose(fp);
     if (rsa == NULL) {
         std::cerr << "Ошибка чтения публичного ключа" << std::endl;
+        ERR_print_errors_fp(stderr);
         return {};
     }
 
-    int messageLength = message.length();
-    std::vector<unsigned char> encryptedData(RSA_size(rsa));
-    int encryptedLength = RSA_public_encrypt(messageLength, (unsigned char*)message.c_str(), encryptedData.data(), rsa, RSA_PKCS1_PADDING);
-    if (encryptedLength == -1) {
-        std::cerr << "Ошибка шифрования RSA" << std::endl;
-        RSA_free(rsa);
-        return {};
+    int blockSize = RSA_size(rsa) - 11; // Максимальный размер блока для шифрования
+    std::vector<unsigned char> encryptedData;
+
+    for (size_t i = 0; i < message.size(); i += blockSize) {
+        size_t chunkSize = std::min(static_cast<size_t>(blockSize), message.size() - i);
+        std::vector<unsigned char> chunk(message.begin() + i, message.begin() + i + chunkSize);
+
+        std::vector<unsigned char> encryptedChunk(RSA_size(rsa));
+        int encryptedLength = RSA_public_encrypt(chunk.size(), chunk.data(), encryptedChunk.data(), rsa, RSA_PKCS1_PADDING);
+        if (encryptedLength == -1) {
+            std::cerr << "Ошибка шифрования RSA" << std::endl;
+            ERR_print_errors_fp(stderr);
+            RSA_free(rsa);
+            return {};
+        }
+
+        encryptedData.insert(encryptedData.end(), encryptedChunk.begin(), encryptedChunk.begin() + encryptedLength);
     }
 
     RSA_free(rsa);
-    encryptedData.resize(encryptedLength);
     return encryptedData;
 }
 
-std::string rsaDecryptBinary(const std::vector<unsigned char>& encryptedData, const std::string& privateKeyFilename) {
+std::vector<unsigned char> rsaDecryptFile(const std::vector<unsigned char>& encryptedData, const std::string& privateKeyFilename) {
     FILE *fp = fopen(privateKeyFilename.c_str(), "r");
     if (fp == NULL) {
         std::cerr << "Ошибка открытия приватного ключа: " << privateKeyFilename << std::endl;
-        return "";
+        return {};
     }
 
     RSA *rsa = PEM_read_RSAPrivateKey(fp, NULL, NULL, NULL);
@@ -95,28 +106,27 @@ std::string rsaDecryptBinary(const std::vector<unsigned char>& encryptedData, co
     if (rsa == NULL) {
         std::cerr << "Ошибка чтения приватного ключа" << std::endl;
         ERR_print_errors_fp(stderr);
-        return "";
+        return {};
     }
 
-    size_t encryptedLength = encryptedData.size();
-    if (encryptedLength > (size_t)RSA_size(rsa)) {
-        std::cerr << "Ошибка: данные для расшифровки слишком большие для ключа RSA." << std::endl;
-        RSA_free(rsa);
-        return "";
+    int blockSize = RSA_size(rsa);
+    std::vector<unsigned char> decryptedData;
+
+    for (size_t i = 0; i < encryptedData.size(); i += blockSize) {
+        std::vector<unsigned char> encryptedChunk(encryptedData.begin() + i, encryptedData.begin() + i + blockSize);
+
+        std::vector<unsigned char> decryptedChunk(RSA_size(rsa));
+        int decryptedLength = RSA_private_decrypt(encryptedChunk.size(), encryptedChunk.data(), decryptedChunk.data(), rsa, RSA_PKCS1_PADDING);
+        if (decryptedLength == -1) {
+            std::cerr << "Ошибка расшифровки RSA" << std::endl;
+            ERR_print_errors_fp(stderr);
+            RSA_free(rsa);
+            return {};
+        }
+
+        decryptedData.insert(decryptedData.end(), decryptedChunk.begin(), decryptedChunk.begin() + decryptedLength);
     }
 
-    std::vector<unsigned char> decryptedData(RSA_size(rsa));
-
-    int decryptedLength = RSA_private_decrypt(encryptedLength, encryptedData.data(), decryptedData.data(), rsa, RSA_PKCS1_PADDING);
-
-    if (decryptedLength == -1) {
-        std::cerr << "Ошибка расшифровки RSA" << std::endl;
-        ERR_print_errors_fp(stderr);
-        RSA_free(rsa);
-        return "";
-    }
-
-    std::string decryptedMessage((char*)decryptedData.data(), decryptedLength);
     RSA_free(rsa);
-    return decryptedMessage;
+    return decryptedData;
 }

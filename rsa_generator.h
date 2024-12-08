@@ -4,8 +4,13 @@
 #include <string>
 #include <vector>
 
-void generateRSAKeys(const std::string& entropyData, const std::string& filename);
-std::vector<unsigned char> rsaEncryptBinary(const std::string& message, const std::string& publicKeyFilename);
-std::string rsaDecryptBinary(const std::vector<unsigned char>& encryptedData, const std::string& privateKeyFilename);
+// Генерация RSA ключей
+void generateRSAKeys(const std::string& entropyData, const std::string& publicKeyFilename, const std::string& privateKeyFilename);
+
+// RSA шифрование файла
+std::vector<unsigned char> rsaEncryptFile(const std::vector<unsigned char>& message, const std::string& publicKeyFilename);
+
+// RSA расшифрование файла
+std::vector<unsigned char> rsaDecryptFile(const std::vector<unsigned char>& encryptedData, const std::string& privateKeyFilename);
 
 #endif // RSA_GENERATOR_H

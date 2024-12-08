@@ -93,7 +93,26 @@ std::string openFileDialog(HWND hwnd, const std::string& title) {
     }
     return "";
 }
+std::string saveFileDialog(HWND hwnd, const std::string& title, const std::string& filter) {
+    OPENFILENAME ofn;
+    char szFile[260] = {0};
 
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = sizeof(szFile);
+    ofn.lpstrFilter = filter.c_str();
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile[0] = '\0';
+    ofn.lpstrTitle = title.c_str();
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+
+    if (GetSaveFileName(&ofn)) {
+        return std::string(szFile);
+    }
+    return "";
+}
 // Функция обработки сообщений окна
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     PAINTSTRUCT ps;
@@ -184,136 +203,169 @@ std::vector<unsigned char> readFileToVector(const std::string& filename, size_t 
 
 void handleRSACryptoEncryption(HWND hwnd) {
     std::string publicKeyFile;
+    std::string inputFile;
     std::string outputFile;
 
     publicKeyFile = openFileDialog(hwnd, "Select the RSA public key");
-    std::cout << publicKeyFile << "\n";
-
-    const char* className = "MessageInputWindow";
-    WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = MessageInputWindowProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = className;
-    RegisterClass(&wc);
-
-    HWND inputWindow = CreateWindowEx(0, className, "Enter Message", WS_OVERLAPPEDWINDOW,
-                                      CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, wc.hInstance, NULL);
-
-    if (inputWindow == NULL) {
-        showMessageN("Failed to create input window.");
+    if (publicKeyFile.empty()) {
+        showMessageN("RSA public key file selection was cancelled.");
         return;
     }
 
-    ShowWindow(inputWindow, SW_SHOWNORMAL);
-    UpdateWindow(inputWindow);
-
-    MSG msg = { 0 };
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+    inputFile = openFileDialog(hwnd, "Select the file to encrypt");
+    if (inputFile.empty()) {
+        showMessageN("Input file selection was cancelled.");
+        return;
     }
 
-    std::cout << "Message for encryption: " << messageN << std::endl;
-
-    outputFile = openFileDialog(hwnd, "Select the file to save the encrypted message");
-    std::cout << outputFile << "\n";
-
-    std::vector<unsigned char> encryptedRSA = rsaEncryptBinary(messageN, publicKeyFile);
-
-    std::string hexEncrypted;
-    for (unsigned char c : encryptedRSA) {
-        char hex[3];
-        snprintf(hex, sizeof(hex), "%02X", c);
-        hexEncrypted += hex;
+    outputFile = openFileDialog(hwnd, "Select the file to save the encrypted data");
+    if (outputFile.empty()) {
+        showMessageN("Output file selection was cancelled.");
+        return;
     }
 
-    std::ofstream outFile(outputFile);
+    // Чтение содержимого файла
+    std::ifstream fileIn(inputFile, std::ios::binary);
+    if (!fileIn) {
+        showMessageN("Error opening input file.");
+        return;
+    }
+
+    std::vector<unsigned char> fileData((std::istreambuf_iterator<char>(fileIn)), std::istreambuf_iterator<char>());
+
+    // Шифрование данных
+    std::vector<unsigned char> encryptedRSA = rsaEncryptFile(fileData, publicKeyFile);
+
+    // Запись зашифрованных данных в файл
+    std::ofstream outFile(outputFile, std::ios::binary);
     if (!outFile) {
-        showMessageN("Error opening the file for writing.");
+        showMessageN("Error opening output file for writing.");
         return;
     }
 
-    outFile << hexEncrypted;
+    outFile.write((char*)encryptedRSA.data(), encryptedRSA.size());
     if (!outFile) {
-        showMessageN("Error writing to the file.");
+        showMessageN("Error writing to the output file.");
         return;
     }
 
-    showMessageN("The encrypted RSA message has been successfully saved to a file: " + outputFile);
+    showMessageN("The file has been successfully encrypted and saved to: " + outputFile);
 }
 
 
+void handleRSAKeyGeneration(HWND hwnd, const std::string& entropyData) {
+    // Открываем диалоговое окно для выбора пути сохранения публичного ключа
+    std::string publicKeyPath = saveFileDialog(hwnd, "Save RSA Public Key", "RSA Public Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
+    if (publicKeyPath.empty()) {
+        showMessageN("RSA public key file save was cancelled.");
+        return;
+    }
 
+    // Открываем диалоговое окно для выбора пути сохранения приватного ключа
+    std::string privateKeyPath = saveFileDialog(hwnd, "Save RSA Private Key", "RSA Private Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
+    if (privateKeyPath.empty()) {
+        showMessageN("RSA private key file save was cancelled.");
+        return;
+    }
 
-void handleRSAKeyGeneration(const std::string& entropyData) {
-    generateRSAKeys(entropyData, "my_rsa_keys");
-    showMessageN("RSA keys have been successfully generated and saved as 'my_rsa_keys'.");
+    // Генерация ключей и сохранение их по выбранным путям
+    generateRSAKeys(entropyData, publicKeyPath, privateKeyPath);
+    showMessageN("RSA keys have been successfully generated and saved.");
 }
 
+void handleAESKeyGeneration(HWND hwnd, const std::string& entropyData) {
+    // Открываем диалоговое окно для выбора пути сохранения ключа
+    std::string keyFile = saveFileDialog(hwnd, "Save AES Key", "AES Key (*.key)\0*.key\0All Files (*.*)\0*.*\0");
+    if (keyFile.empty()) {
+        showMessageN("AES key file save was cancelled.");
+        return;
+    }
 
-void handleAESKeyGeneration() {
-    const std::string keyFile = "my_aes_key.txt";
-    const std::string ivFile = "my_aes_iv.txt";
+    // Открываем диалоговое окно для выбора пути сохранения IV
+    std::string ivFile = saveFileDialog(hwnd, "Save AES IV", "AES IV (*.iv)\0*.iv\0All Files (*.*)\0*.*\0");
+    if (ivFile.empty()) {
+        showMessageN("AES IV file save was cancelled.");
+        return;
+    }
 
-    generateAESKeys(keyFile, ivFile);
-
-    showMessageN("AES keys and IV have been successfully generated and saved as 'my_aes_key.txt' and 'my_aes_iv.txt'.");
+    // Генерация ключей и сохранение их по выбранным путям
+    generateAESKeys(entropyData, keyFile, ivFile);
+    showMessageN("AES keys and IV have been successfully generated and saved.");
 }
 
-void handleECDSAKeyGeneration() {
-    const std::string privateKeyFile = "ecdsa_private_key.pem";
-    const std::string publicKeyFile = "ecdsa_public_key.pem";
+void handleECDSAKeyGeneration(HWND hwnd, const std::string& entropyData) {
+    // Открываем диалоговое окно для выбора пути сохранения приватного ключа
+    std::string privateKeyFile = saveFileDialog(hwnd, "Save ECDSA Private Key", "ECDSA Private Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
+    if (privateKeyFile.empty()) {
+        showMessageN("ECDSA private key file save was cancelled.");
+        return;
+    }
 
-    generateECDSAKeys(privateKeyFile, publicKeyFile);
+    // Открываем диалоговое окно для выбора пути сохранения публичного ключа
+    std::string publicKeyFile = saveFileDialog(hwnd, "Save ECDSA Public Key", "ECDSA Public Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
+    if (publicKeyFile.empty()) {
+        showMessageN("ECDSA public key file save was cancelled.");
+        return;
+    }
 
-    showMessageN("ECDSA private and public keys have been successfully generated and saved as 'ecdsa_private_key.pem' and 'ecdsa_public_key.pem'.");
+    // Генерация ключей и сохранение их по выбранным путям
+    generateECDSAKeys(entropyData, privateKeyFile, publicKeyFile);
+    showMessageN("ECDSA keys have been successfully generated and saved.");
 }
 
 void handleRSACryptoDecryption(HWND hwnd) {
     std::string privateKeyFile;
+    std::string inputFile;
+    std::string outputFile;
 
     privateKeyFile = openFileDialog(hwnd, "Select the RSA private key");
-    std::cout << privateKeyFile << "\n";
-
-    const char* className = "EncryptedMessageInputWindow";
-    WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = MessageInputWindowProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = className;
-    RegisterClass(&wc);
-
-    HWND inputWindow = CreateWindowEx(0, className, "Enter Encrypted Message", WS_OVERLAPPEDWINDOW,
-                                      CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, wc.hInstance, NULL);
-
-    if (inputWindow == NULL) {
-        showMessageN("Failed to create input window.");
+    if (privateKeyFile.empty()) {
+        showMessageN("RSA private key file selection was cancelled.");
         return;
     }
 
-    ShowWindow(inputWindow, SW_SHOWNORMAL);
-    UpdateWindow(inputWindow);
-
-    MSG msg = { 0 };
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-    std::cout << "Encrypted message for decryption: " << messageN << std::endl;
-
-    std::vector<unsigned char> encryptedData;
-    for (size_t i = 0; i < messageN.length(); i += 2) {
-        std::string byteString = messageN.substr(i, 2);
-        char byte = (char) strtol(byteString.c_str(), NULL, 16);
-        encryptedData.push_back(byte);
+    inputFile = openFileDialog(hwnd, "Select the file to decrypt");
+    if (inputFile.empty()) {
+        showMessageN("Input file selection was cancelled.");
+        return;
     }
 
-    std::string decryptedRSA = rsaDecryptBinary(encryptedData, privateKeyFile);
+    outputFile = openFileDialog(hwnd, "Select the file to save the decrypted data");
+    if (outputFile.empty()) {
+        showMessageN("Output file selection was cancelled.");
+        return;
+    }
 
-    showMessageN("Decrypted RSA message: " + decryptedRSA);
+    // Чтение зашифрованного содержимого файла
+    std::ifstream fileIn(inputFile, std::ios::binary);
+    if (!fileIn) {
+        showMessageN("Error opening input file.");
+        return;
+    }
+
+    std::vector<unsigned char> encryptedData((std::istreambuf_iterator<char>(fileIn)), std::istreambuf_iterator<char>());
+
+    // Расшифрование данных
+    std::vector<unsigned char> decryptedRSA = rsaDecryptFile(encryptedData, privateKeyFile);
+
+    // Запись расшифрованных данных в файл
+    std::ofstream outFile(outputFile, std::ios::binary);
+    if (!outFile) {
+        showMessageN("Error opening output file for writing.");
+        return;
+    }
+
+    outFile.write((char*)decryptedRSA.data(), decryptedRSA.size());
+    if (!outFile) {
+        showMessageN("Error writing to the output file.");
+        return;
+    }
+
+    showMessageN("The file has been successfully decrypted and saved to: " + outputFile);
 }
 
 void handleAESEncryption(HWND hwnd) {
-    std::string keyFile, ivFile, message, outputFile;
+    std::string keyFile, ivFile, inputFile, outputFile;
 
     keyFile = openFileDialog(hwnd, "Select the AES Key File");
     if (keyFile.empty()) {
@@ -327,36 +379,13 @@ void handleAESEncryption(HWND hwnd) {
         return;
     }
 
-    const char* className = "MessageInputWindow";
-    WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = MessageInputWindowProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = className;
-    RegisterClass(&wc);
-
-    HWND inputWindow = CreateWindowEx(0, className, "Enter Message", WS_OVERLAPPEDWINDOW,
-                                      CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, wc.hInstance, NULL);
-
-    if (inputWindow == NULL) {
-        showMessageN("Failed to create input window.");
+    inputFile = openFileDialog(hwnd, "Select the file to encrypt");
+    if (inputFile.empty()) {
+        showMessageN("Input file selection was cancelled.");
         return;
     }
 
-    ShowWindow(inputWindow, SW_SHOWNORMAL);
-    UpdateWindow(inputWindow);
-
-    MSG msg = { 0 };
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-
-    if (messageN.empty()) {
-        showMessageN("No message entered for encryption.");
-        return;
-    }
-
-    outputFile = openFileDialog(hwnd, "Select the file to save the encrypted message");
+    outputFile = openFileDialog(hwnd, "Select the file to save the encrypted data");
     if (outputFile.empty()) {
         showMessageN("Output file selection was cancelled.");
         return;
@@ -376,32 +405,36 @@ void handleAESEncryption(HWND hwnd) {
         return;
     }
 
-    std::vector<unsigned char> encrypted = aesEncrypt(messageN, key, iv);
-
-    std::string hexEncrypted;
-    for (unsigned char c : encrypted) {
-        char hex[3];
-        snprintf(hex, sizeof(hex), "%02X", c);
-        hexEncrypted += hex;
-    }
-
-    std::ofstream outFile(outputFile);
-    if (!outFile) {
-        showMessageN("Error opening the file for writing.");
+    // Чтение содержимого файла
+    std::ifstream fileIn(inputFile, std::ios::binary);
+    if (!fileIn) {
+        showMessageN("Error opening input file.");
         return;
     }
 
-    outFile << hexEncrypted;
+    std::vector<unsigned char> fileData((std::istreambuf_iterator<char>(fileIn)), std::istreambuf_iterator<char>());
+
+    // Шифрование данных
+    std::vector<unsigned char> encrypted = aesEncrypt(std::string(fileData.begin(), fileData.end()), key, iv);
+
+    // Запись зашифрованных данных в файл
+    std::ofstream outFile(outputFile, std::ios::binary);
     if (!outFile) {
-        showMessageN("Error writing to the file.");
+        showMessageN("Error opening output file for writing.");
         return;
     }
 
-    showMessageN("The encrypted message has been successfully saved to the file: " + outputFile);
+    outFile.write((char*)encrypted.data(), encrypted.size());
+    if (!outFile) {
+        showMessageN("Error writing to the output file.");
+        return;
+    }
+
+    showMessageN("The file has been successfully encrypted and saved to: " + outputFile);
 }
 
 void handleAESDecryption(HWND hwnd) {
-    std::string keyFile, ivFile;
+    std::string keyFile, ivFile, inputFile, outputFile;
 
     keyFile = openFileDialog(hwnd, "Select the AES Key File");
     if (keyFile.empty()) {
@@ -415,32 +448,15 @@ void handleAESDecryption(HWND hwnd) {
         return;
     }
 
-    const char* className = "EncryptedMessageInputWindow";
-    WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = MessageInputWindowProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = className;
-    RegisterClass(&wc);
-
-    HWND inputWindow = CreateWindowEx(0, className, "Enter Encrypted Message (Hex Format)", WS_OVERLAPPEDWINDOW,
-                                      CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, wc.hInstance, NULL);
-
-    if (inputWindow == NULL) {
-        showMessageN("Failed to create input window.");
+    inputFile = openFileDialog(hwnd, "Select the file to decrypt");
+    if (inputFile.empty()) {
+        showMessageN("Input file selection was cancelled.");
         return;
     }
 
-    ShowWindow(inputWindow, SW_SHOWNORMAL);
-    UpdateWindow(inputWindow);
-
-    MSG msg = { 0 };
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-
-    if (messageN.empty()) {
-        showMessageN("No encrypted message provided.");
+    outputFile = openFileDialog(hwnd, "Select the file to save the decrypted data");
+    if (outputFile.empty()) {
+        showMessageN("Output file selection was cancelled.");
         return;
     }
 
@@ -458,52 +474,45 @@ void handleAESDecryption(HWND hwnd) {
         return;
     }
 
-    std::vector<unsigned char> encryptedData;
-    for (size_t i = 0; i < messageN.length(); i += 2) {
-        std::string byteString = messageN.substr(i, 2);
-        unsigned char byte = (unsigned char)strtol(byteString.c_str(), nullptr, 16);
-        encryptedData.push_back(byte);
+    // Чтение зашифрованного содержимого файла
+    std::ifstream fileIn(inputFile, std::ios::binary);
+    if (!fileIn) {
+        showMessageN("Error opening input file.");
+        return;
     }
 
+    std::vector<unsigned char> encryptedData((std::istreambuf_iterator<char>(fileIn)), std::istreambuf_iterator<char>());
+
+    // Расшифрование данных
     std::string decrypted = aesDecrypt(encryptedData, key, iv);
     if (decrypted.empty()) {
         showMessageN("Decryption failed.");
         return;
     }
 
-    showMessageN("Decrypted message: " + decrypted);
-}
-
-void handleMessageSigning(HWND hwnd) {
-    std::string privateKeyFile;
-    std::string outputFile;
-
-    const char* className = "MessageInputWindow";
-    WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = MessageInputWindowProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = className;
-    RegisterClass(&wc);
-
-    HWND inputWindow = CreateWindowEx(0, className, "Enter Message for Signing", WS_OVERLAPPEDWINDOW,
-                                      CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, wc.hInstance, NULL);
-
-    if (inputWindow == NULL) {
-        showMessageN("Failed to create input window.");
+    // Запись расшифрованных данных в файл
+    std::ofstream outFile(outputFile, std::ios::binary);
+    if (!outFile) {
+        showMessageN("Error opening output file for writing.");
         return;
     }
 
-    ShowWindow(inputWindow, SW_SHOWNORMAL);
-    UpdateWindow(inputWindow);
-
-    MSG msg = { 0 };
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+    outFile.write(decrypted.data(), decrypted.size());
+    if (!outFile) {
+        showMessageN("Error writing to the output file.");
+        return;
     }
 
-    if (messageN.empty()) {
-        showMessageN("No message provided for signing.");
+    showMessageN("The file has been successfully decrypted and saved to: " + outputFile);
+}
+void handleMessageSigning(HWND hwnd) {
+    std::string privateKeyFile;
+    std::string inputFile;
+    std::string outputFile;
+
+    inputFile = openFileDialog(hwnd, "Select the file to sign");
+    if (inputFile.empty()) {
+        showMessageN("Input file selection was cancelled.");
         return;
     }
 
@@ -519,7 +528,7 @@ void handleMessageSigning(HWND hwnd) {
         return;
     }
 
-    std::vector<unsigned char> signature = signMessage(messageN, privateKeyFile);
+    std::vector<unsigned char> signature = signFile(inputFile, privateKeyFile);
 
     std::string hexSignature;
     for (unsigned char c : signature) {
@@ -545,77 +554,35 @@ void handleMessageSigning(HWND hwnd) {
 
 void handleSignatureVerification(HWND hwnd) {
     std::string publicKeyFile;
-    std::string hexSignature;
+    std::string inputFile;
+    std::string signatureFile;
 
-    // Открытие диалогового окна для выбора публичного ключа
+    inputFile = openFileDialog(hwnd, "Select the file to verify");
+    if (inputFile.empty()) {
+        showMessageN("Input file selection was cancelled.");
+        return;
+    }
+
     publicKeyFile = openFileDialog(hwnd, "Select the ECDSA public key");
     if (publicKeyFile.empty()) {
         showMessageN("Public key file selection canceled or failed.");
         return;
     }
 
-    // Создание окна для ввода сообщения
-    const char* className = "MessageInputWindow";
-    WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = MessageInputWindowProc; // Обработчик окна для ввода
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = className;
-    RegisterClass(&wc);
-
-    HWND inputWindow = CreateWindowEx(0, className, "Enter message for signature verification", WS_OVERLAPPEDWINDOW,
-                                      CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, wc.hInstance, NULL);
-    if (!inputWindow) {
-        showMessageN("Failed to create message input window.");
+    signatureFile = openFileDialog(hwnd, "Select the signature file");
+    if (signatureFile.empty()) {
+        showMessageN("Signature file selection was cancelled.");
         return;
     }
 
-    ShowWindow(inputWindow, SW_SHOWNORMAL);
-    UpdateWindow(inputWindow);
-
-    // Цикл обработки сообщений окна ввода
-    MSG msg = { 0 };
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-
-    // Проверка наличия введенного сообщения
-    if (messageN.empty()) {
-        showMessageN("Message input was canceled or empty.");
+    // Чтение подписи из файла
+    std::ifstream sigFileIn(signatureFile);
+    if (!sigFileIn) {
+        showMessageN("Error opening signature file.");
         return;
     }
 
-
-    // Создание окна для ввода сообщения
-    const char* className_ = "SignatureInputWindow";
-    WNDCLASS wc_ = { 0 };
-    wc_.lpfnWndProc = MessageInputWindowProc; // Обработчик окна для ввода
-    wc_.hInstance = GetModuleHandle(NULL);
-    wc_.lpszClassName = className_;
-    RegisterClass(&wc_);
-
-    HWND inputWindow_ = CreateWindowEx(0, className_, "Enter signature in hexadecimal format", WS_OVERLAPPEDWINDOW,
-                                       CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, wc_.hInstance, NULL);
-    if (!inputWindow_) {
-        showMessageN("Failed to create signature input window.");
-        return;
-    }
-
-    ShowWindow(inputWindow_, SW_SHOWNORMAL);
-    UpdateWindow(inputWindow_);
-
-    // Цикл обработки сообщений окна ввода
-    MSG msg_ = { 0 };
-    while (GetMessage(&msg_, NULL, 0, 0)) {
-        TranslateMessage(&msg_);
-        DispatchMessage(&msg_);
-    }
-    hexSignature = messageN;
-    // Проверка наличия введенной подписи
-    if (hexSignature.empty()) {
-        showMessageN("Signature input was canceled or empty.");
-        return;
-    }
+    std::string hexSignature((std::istreambuf_iterator<char>(sigFileIn)), std::istreambuf_iterator<char>());
 
     // Преобразование HEX-строки в бинарный формат
     std::vector<unsigned char> signature;
@@ -626,14 +593,13 @@ void handleSignatureVerification(HWND hwnd) {
     }
 
     // Верификация подписи
-    bool valid = verifySignature(messageN, signature, publicKeyFile);
+    bool valid = verifyFileSignature(inputFile, signature, publicKeyFile);
     if (valid) {
         showMessageN("The signature is valid.");
     } else {
         showMessageN("The signature is invalid.");
     }
 }
-
 // Функция для обработки сообщений окна
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     // Обработка команд (кнопок)
@@ -641,13 +607,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_COMMAND:
             switch (LOWORD(wParam)) {
                 case 1: // Генерация RSA ключей
-                    handleRSAKeyGeneration(entropyData);
+                    handleRSAKeyGeneration(hwnd,entropyData);
                     break;
                 case 2: // Генерация AES ключей
-                    handleAESKeyGeneration();
+                    handleAESKeyGeneration(hwnd,entropyData);
                     break;
                 case 3: // Генерация ECDSA ключей
-                    handleECDSAKeyGeneration();
+                    handleECDSAKeyGeneration(hwnd,entropyData);
                     break;
                 case 4: // Шифрование RSA
                     handleRSACryptoEncryption(hwnd);

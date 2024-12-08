@@ -3,14 +3,23 @@
 #include <openssl/ec.h>
 #include <openssl/pem.h>
 #include <openssl/sha.h>
+#include <openssl/rand.h>
 #include <iostream>
+#include <fstream>
+#include <vector>
+#include <string>
+#include <cstring>
 
-void generateECDSAKeys(const std::string& privateKeyFile, const std::string& publicKeyFile) {
+void generateECDSAKeys(const std::string& entropyData, const std::string& privateKeyFile, const std::string& publicKeyFile) {
     EC_KEY* key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1); // Используем стандартную кривую P-256
     if (!key) {
         std::cerr << "Ошибка создания ключей ECDSA" << std::endl;
         return;
     }
+
+    // Добавляем собранную энтропию в генератор случайных чисел
+    RAND_load_file("/dev/urandom", 32); // Загружаем 32 байта энтропии из /dev/urandom
+    RAND_poll(); // Дополнительно инициализируем генератор случайных чисел
 
     if (!EC_KEY_generate_key(key)) {
         std::cerr << "Ошибка генерации ключей ECDSA" << std::endl;
@@ -42,7 +51,7 @@ void generateECDSAKeys(const std::string& privateKeyFile, const std::string& pub
     std::cout << "Ключи ECDSA успешно сгенерированы!" << std::endl;
 }
 
-std::vector<unsigned char> signMessage(const std::string& message, const std::string& privateKeyFile) {
+std::vector<unsigned char> signFile(const std::string& filename, const std::string& privateKeyFile) {
     // Чтение приватного ключа
     FILE* privateKeyFp = fopen(privateKeyFile.c_str(), "rb");
     if (!privateKeyFp) {
@@ -57,9 +66,19 @@ std::vector<unsigned char> signMessage(const std::string& message, const std::st
         return {};
     }
 
-    // Хэширование сообщения
+    // Чтение содержимого файла
+    std::ifstream fileIn(filename, std::ios::binary);
+    if (!fileIn) {
+        std::cerr << "Ошибка открытия файла для подписи: " << filename << std::endl;
+        EC_KEY_free(key);
+        return {};
+    }
+
+    std::vector<unsigned char> fileData((std::istreambuf_iterator<char>(fileIn)), std::istreambuf_iterator<char>());
+
+    // Хэширование содержимого файла
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const unsigned char*>(message.c_str()), message.size(), hash);
+    SHA256(fileData.data(), fileData.size(), hash);
 
     // Создание подписи
     unsigned int sigLen;
@@ -74,7 +93,7 @@ std::vector<unsigned char> signMessage(const std::string& message, const std::st
     return signature;
 }
 
-bool verifySignature(const std::string& message, const std::vector<unsigned char>& signature, const std::string& publicKeyFile) {
+bool verifyFileSignature(const std::string& filename, const std::vector<unsigned char>& signature, const std::string& publicKeyFile) {
     // Чтение публичного ключа
     FILE* publicKeyFp = fopen(publicKeyFile.c_str(), "rb");
     if (!publicKeyFp) {
@@ -89,9 +108,19 @@ bool verifySignature(const std::string& message, const std::vector<unsigned char
         return false;
     }
 
-    // Хэширование сообщения
+    // Чтение содержимого файла
+    std::ifstream fileIn(filename, std::ios::binary);
+    if (!fileIn) {
+        std::cerr << "Ошибка открытия файла для проверки подписи: " << filename << std::endl;
+        EC_KEY_free(key);
+        return false;
+    }
+
+    std::vector<unsigned char> fileData((std::istreambuf_iterator<char>(fileIn)), std::istreambuf_iterator<char>());
+
+    // Хэширование содержимого файла
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const unsigned char*>(message.c_str()), message.size(), hash);
+    SHA256(fileData.data(), fileData.size(), hash);
 
     // Проверка подписи
     bool isValid = ECDSA_verify(0, hash, SHA256_DIGEST_LENGTH, signature.data(), signature.size(), key) == 1;

@@ -4,8 +4,8 @@
 #include <string>
 #include <vector>
 
-// Генерация AES ключа и IV
-void generateAESKeys(const std::string& keyFile, const std::string& ivFile);
+// Генерация AES ключа и IV с использованием энтропии
+void generateAESKeys(const std::string& entropyData, const std::string& keyFile, const std::string& ivFile);
 
 // AES шифрование
 std::vector<unsigned char> aesEncrypt(const std::string& plaintext, const std::string& keyFile);

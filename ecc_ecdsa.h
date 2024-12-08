@@ -4,13 +4,13 @@
 #include <string>
 #include <vector>
 
-// Генерация ключей ECDSA
-void generateECDSAKeys(const std::string& privateKeyFile, const std::string& publicKeyFile);
+// Генерация ключей ECDSA с использованием энтропии
+void generateECDSAKeys(const std::string& entropyData, const std::string& privateKeyFile, const std::string& publicKeyFile);
 
-// Генерация подписи с использованием приватного ключа ECDSA
-std::vector<unsigned char> signMessage(const std::string& message, const std::string& privateKeyFile);
+// Подпись файла с использованием приватного ключа ECDSA
+std::vector<unsigned char> signFile(const std::string& filename, const std::string& privateKeyFile);
 
-// Проверка подписи с использованием публичного ключа ECDSA
-bool verifySignature(const std::string& message, const std::vector<unsigned char>& signature, const std::string& publicKeyFile);
+// Проверка подписи файла с использованием публичного ключа ECDSA
+bool verifyFileSignature(const std::string& filename, const std::vector<unsigned char>& signature, const std::string& publicKeyFile);
 
 #endif // ECC_ECDSA_H
