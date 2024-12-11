@@ -21,7 +21,7 @@
 #define IDC_EDIT_MESSAGE 101
 #define IDC_BUTTON_OK 102
 #define IDC_EDIT_PASSWORD 103
-
+#define IDC_BUTTON_DECRYPTION_PRIV_KEY 10
 std::string messageN;
 
 LRESULT CALLBACK MessageInputWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -593,7 +593,56 @@ void handleSignatureVerification(HWND hwnd) {
         showMessageN("The signature is invalid.");
     }
 }
+void handleDecryptionWithPrivateKey(HWND hwnd) {
+    std::string privateKeyFile;
+    std::string inputFile;
+    std::string outputFile;
 
+    privateKeyFile = openFileDialog(hwnd, "Select the RSA private key");
+    if (privateKeyFile.empty()) {
+        showMessageN("RSA private key file selection was cancelled.");
+        return;
+    }
+
+    inputFile = openFileDialog(hwnd, "Select the file to decrypt");
+    if (inputFile.empty()) {
+        showMessageN("Input file selection was cancelled.");
+        return;
+    }
+
+    outputFile = openFileDialog(hwnd, "Select the file to save the decrypted data");
+    if (outputFile.empty()) {
+        showMessageN("Output file selection was cancelled.");
+        return;
+    }
+
+    // Чтение зашифрованного содержимого файла
+    std::ifstream fileIn(inputFile, std::ios::binary);
+    if (!fileIn) {
+        showMessageN("Error opening input file.");
+        return;
+    }
+
+    std::vector<unsigned char> encryptedData((std::istreambuf_iterator<char>(fileIn)), std::istreambuf_iterator<char>());
+
+    // Расшифрование данных
+    std::vector<unsigned char> decryptedRSA = rsaDecryptFile(encryptedData, privateKeyFile);
+
+    // Запись расшифрованных данных в файл
+    std::ofstream outFile(outputFile, std::ios::binary);
+    if (!outFile) {
+        showMessageN("Error opening output file for writing.");
+        return;
+    }
+
+    outFile.write((char*)decryptedRSA.data(), decryptedRSA.size());
+    if (!outFile) {
+        showMessageN("Error writing to the output file.");
+        return;
+    }
+
+    showMessageN("The file has been successfully decrypted and saved to: " + outputFile);
+}
 // Функция для обработки сообщений окна
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     // Обработка команд (кнопок)
@@ -717,6 +766,10 @@ void createButtons(HWND hwnd, HINSTANCE hInstance) {
     y += buttonHeight + spacing;
     CreateWindow("BUTTON", "ECDSA Verify Signature", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)9, hInstance, nullptr);
+    // Добавляем новую кнопку
+    y += buttonHeight + spacing;
+    CreateWindow("BUTTON", "Decryption priv_key", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)IDC_BUTTON_DECRYPTION_PRIV_KEY, hInstance, nullptr);
 
     y += buttonHeight + spacing;
     CreateWindow("BUTTON", "Exit", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
