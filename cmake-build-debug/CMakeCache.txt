@@ -269,6 +269,9 @@ EntropyRSA_SOURCE_DIR:STATIC=C:/Users/yaros/CLionProjects/crypto
 //Path to a library.
 LIB_EAY:FILEPATH=LIB_EAY-NOTFOUND
 
+//The directory containing a CMake configuration file for LibZip.
+LibZip_DIR:PATH=LibZip_DIR-NOTFOUND
+
 //The directory containing a CMake configuration file for OpenSSL.
 OpenSSL_DIR:PATH=C:/Users/yaros/.vcpkg-clion/vcpkg/installed/x64-mingw-dynamic/share/openssl
 

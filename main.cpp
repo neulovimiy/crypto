@@ -13,11 +13,14 @@
 #include <openssl/evp.h>
 #include <limits>
 #include <iomanip>
-#include <thread>
-
+#include <openssl/rand.h>
+#include <openssl/pem.h>
+#include <openssl/err.h>
+#include <sstream>
+#pragma comment(lib, "advapi32.lib")
 #define IDC_EDIT_MESSAGE 101
 #define IDC_BUTTON_OK 102
-#define _CRT_SECURE_NO_WARNINGS
+#define IDC_EDIT_PASSWORD 103
 
 std::string messageN;
 
@@ -55,7 +58,6 @@ LRESULT CALLBACK MessageInputWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPA
     return 0;
 }
 
-
 // Функция для отображения сообщения
 void showMessageN(const std::string& message) {
     // Преобразуем строку в юникод
@@ -70,7 +72,6 @@ const std::string CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxy
 // Глобальная переменная для хранения процента прогресса
 int progressPercent = 0;
 std::string entropyData;
-
 
 // Открытие диалогового окна для выбора пути к файлу
 std::string openFileDialog(HWND hwnd, const std::string& title) {
@@ -93,6 +94,7 @@ std::string openFileDialog(HWND hwnd, const std::string& title) {
     }
     return "";
 }
+
 std::string saveFileDialog(HWND hwnd, const std::string& title, const std::string& filter) {
     OPENFILENAME ofn;
     char szFile[260] = {0};
@@ -113,6 +115,7 @@ std::string saveFileDialog(HWND hwnd, const std::string& title, const std::strin
     }
     return "";
 }
+
 // Функция обработки сообщений окна
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     PAINTSTRUCT ps;
@@ -191,16 +194,6 @@ std::string aesDecrypt(const std::vector<unsigned char>& ciphertext, const std::
     return std::string(plaintext.begin(), plaintext.end());
 }
 
-// Чтение содержимого файла в вектор байтов
-std::vector<unsigned char> readFileToVector(const std::string& filename, size_t size) {
-    std::ifstream file(filename, std::ios::binary);
-    std::vector<unsigned char> buffer(size);
-    if (file.read(reinterpret_cast<char*>(buffer.data()), size)) {
-        return buffer;
-    }
-    return {};
-}
-
 void handleRSACryptoEncryption(HWND hwnd) {
     std::string publicKeyFile;
     std::string inputFile;
@@ -251,7 +244,6 @@ void handleRSACryptoEncryption(HWND hwnd) {
 
     showMessageN("The file has been successfully encrypted and saved to: " + outputFile);
 }
-
 
 void handleRSAKeyGeneration(HWND hwnd, const std::string& entropyData) {
     // Открываем диалоговое окно для выбора пути сохранения публичного ключа
@@ -505,6 +497,7 @@ void handleAESDecryption(HWND hwnd) {
 
     showMessageN("The file has been successfully decrypted and saved to: " + outputFile);
 }
+
 void handleMessageSigning(HWND hwnd) {
     std::string privateKeyFile;
     std::string inputFile;
@@ -600,6 +593,7 @@ void handleSignatureVerification(HWND hwnd) {
         showMessageN("The signature is invalid.");
     }
 }
+
 // Функция для обработки сообщений окна
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     // Обработка команд (кнопок)
@@ -607,13 +601,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_COMMAND:
             switch (LOWORD(wParam)) {
                 case 1: // Генерация RSA ключей
-                    handleRSAKeyGeneration(hwnd,entropyData);
+                    handleRSAKeyGeneration(hwnd, entropyData);
                     break;
                 case 2: // Генерация AES ключей
-                    handleAESKeyGeneration(hwnd,entropyData);
+                    handleAESKeyGeneration(hwnd, entropyData);
                     break;
                 case 3: // Генерация ECDSA ключей
-                    handleECDSAKeyGeneration(hwnd,entropyData);
+                    handleECDSAKeyGeneration(hwnd, entropyData);
                     break;
                 case 4: // Шифрование RSA
                     handleRSACryptoEncryption(hwnd);
@@ -633,10 +627,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 case 9: // Проверка подписи ECDSA
                     handleSignatureVerification(hwnd);
                     break;
+
                 case 0: // Выход
                     exit(0);
                     PostQuitMessage(0);
                     break;
+
                 default:
                     break;
             }
@@ -726,7 +722,6 @@ void createButtons(HWND hwnd, HINSTANCE hInstance) {
     CreateWindow("BUTTON", "Exit", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)0, hInstance, nullptr);
 }
-
 
 // Создание окна прогресса
 HWND CreateProgressWindow(HINSTANCE hInstance) {
@@ -836,13 +831,118 @@ std::string collectMouseEntropy(int maxDurationMs = 60000, int intervalMs = 10, 
     return entropyData;
 }
 
+// Функция для преобразования вектора байтов в 16-ричную строку
+std::string toHexString(const std::vector<unsigned char>& data) {
+    std::ostringstream hexStream;
+    for (unsigned char byte : data) {
+        hexStream << std::hex << std::setw(2) << std::setfill('0') << (int)byte;
+    }
+    return hexStream.str();
+}
 
-// Основная функция
+// Функция для генерации AES-ключа и IV
+std::pair<std::string, std::string> generateKeyAndIV() {
+    // Генерация AES-ключа (32 байта для AES-256)
+    std::vector<unsigned char> key(32);
+    if (RAND_bytes(key.data(), key.size()) != 1) {
+        std::cerr << "Ошибка генерации AES-ключа." << std::endl;
+        return std::make_pair("", "");
+    }
+
+    // Генерация IV (16 байтов)
+    std::vector<unsigned char> iv(16);
+    if (RAND_bytes(iv.data(), iv.size()) != 1) {
+        std::cerr << "Ошибка генерации IV." << std::endl;
+        return std::make_pair("", "");
+    }
+
+    // Преобразуем ключ и IV в 16-ричный формат
+    std::string keyHex = toHexString(key);
+    std::string ivHex = toHexString(iv);
+
+    return std::make_pair(keyHex, ivHex);
+}
+
+// Функция для сохранения ключа и IV в файл
+void saveKeyAndIVToFile(const std::string& keyHex, const std::string& ivHex, const std::string& filePath) {
+    // Объединяем ключ и IV в одну строку
+    std::string combined = keyHex + ":" + ivHex;
+
+    // Сохранение объединенной строки в текстовый файл
+    std::ofstream file(filePath);
+    if (!file) {
+        std::cerr << "Не удалось открыть файл для записи." << std::endl;
+        return;
+    }
+    file << combined;
+    if (!file) {
+        std::cerr << "Ошибка записи в файл." << std::endl;
+        return;
+    }
+    file.close();
+
+    std::cout << "Key and IV saved to file: " << filePath << std::endl;
+}
+
+
+
+LRESULT CALLBACK PasswordWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+        case WM_CREATE: {
+            // Создание текстового поля для отображения пароля
+            CreateWindowEx(WS_EX_CLIENTEDGE, "EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_READONLY,
+                           50, 50, 300, 30, hwnd, (HMENU)IDC_EDIT_PASSWORD, GetModuleHandle(NULL), NULL);
+            break;
+        }
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            break;
+        default:
+            return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+    return 0;
+}
+
+void showPassword(const std::string& password) {
+    // Регистрация класса окна
+    WNDCLASS wc = {};
+    wc.lpfnWndProc = PasswordWindowProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = "PasswordWindowClass";
+    RegisterClass(&wc);
+
+    // Создание окна
+    HWND hwnd = CreateWindowEx(0, "PasswordWindowClass", "Generated Password", WS_OVERLAPPEDWINDOW,
+                               CW_USEDEFAULT, CW_USEDEFAULT, 400, 200, NULL, NULL, GetModuleHandle(NULL), NULL);
+
+    // Отображение пароля в текстовом поле
+    HWND hEdit = GetDlgItem(hwnd, IDC_EDIT_PASSWORD);
+    SetWindowText(hEdit, password.c_str());
+
+    // Показ окна
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+
+    // Цикл сообщений для окна
+    MSG msg = {};
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+}
+// Функция для проверки доступности USB-накопителя
+bool isUSBDriveAvailable(const std::string& driveLetter) {
+    std::string rootPath = driveLetter + "\\";
+    UINT driveType = GetDriveType(rootPath.c_str());
+
+    // Проверяем, является ли устройство съемным накопителем
+    return driveType == DRIVE_REMOVABLE;
+}
+
 int main() {
     // Установка кодировки консоли
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-
 
     // Инициализация библиотеки OpenSSL
     OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CRYPTO_STRINGS, NULL);
@@ -860,6 +960,28 @@ int main() {
         if (progressPercent >= 100) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
     }
+    // Проверяем, подключен ли внешний накопитель
+    std::string usbDrive = "D:";
+    if (!isUSBDriveAvailable(usbDrive)) {
+        std::cerr << "Ошибка: внешний накопитель (" << usbDrive << ") не найден." << std::endl;
+        return 1;
+    }
+    // Генерация AES-ключа и IV
+    auto keyAndIVHex = generateKeyAndIV();
+    if (keyAndIVHex.first.empty() || keyAndIVHex.second.empty()) {
+        std::cerr << "Ошибка генерации ключа или IV." << std::endl;
+        return 1;
+    }
+
+    // Объединяем ключ и IV в одну строку
+    std::string password = keyAndIVHex.first + ":" + keyAndIVHex.second;
+
+    // Показ пароля пользователю
+    showPassword(password);
+
+    // Сохранение ключа и IV на флешку
+    std::string filePath = usbDrive + "\\key_and_iv.txt";
+    saveKeyAndIVToFile(keyAndIVHex.first, keyAndIVHex.second, filePath);
 
     // Создание окна
     HINSTANCE hInstance = GetModuleHandle(nullptr);
@@ -880,5 +1002,6 @@ int main() {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+
     return 0;
 }
