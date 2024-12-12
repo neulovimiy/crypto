@@ -455,23 +455,137 @@ void handleAESKeyGeneration(HWND hwnd, const std::string& entropyData) {
 }
 
 void handleECDSAKeyGeneration(HWND hwnd, const std::string& entropyData) {
+    // Открываем диалоговое окно для ввода ключа и IV
+    std::string keyIvString;
+    if (DialogBoxParam(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG1), hwnd, DialogProc, (LPARAM)&keyIvString) != IDOK) {
+        MessageBox(hwnd, "Key and IV input cancelled.", "Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    // Проверяем, что ключ и IV введены корректно
+    if (keyIvString.empty()) {
+        MessageBox(hwnd, "Key and IV cannot be empty.", "Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    // Разделяем строку на ключ и IV
+    size_t colonPos = keyIvString.find(':');
+    if (colonPos == std::string::npos) {
+        MessageBox(hwnd, "Invalid format. Please enter the key and IV separated by a colon.", "Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    std::string keyHex = keyIvString.substr(0, colonPos);
+    std::string ivHex = keyIvString.substr(colonPos + 1);
+
+    // Конвертируем HEX строки в массивы байтов
+    std::vector<unsigned char> key = hexStringToBytes(keyHex);
+    std::vector<unsigned char> iv = hexStringToBytes(ivHex);
+
     // Открываем диалоговое окно для выбора пути сохранения приватного ключа
-    std::string privateKeyFile = saveFileDialog(hwnd, "Save ECDSA Private Key", "ECDSA Private Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
-    if (privateKeyFile.empty()) {
+    std::string privateKeyPath = saveFileDialog(hwnd, "Save ECDSA Private Key", "ECDSA Private Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
+    if (privateKeyPath.empty()) {
         showMessageN("ECDSA private key file save was cancelled.");
         return;
     }
 
     // Открываем диалоговое окно для выбора пути сохранения публичного ключа
-    std::string publicKeyFile = saveFileDialog(hwnd, "Save ECDSA Public Key", "ECDSA Public Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
-    if (publicKeyFile.empty()) {
+    std::string publicKeyPath = saveFileDialog(hwnd, "Save ECDSA Public Key", "ECDSA Public Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
+    if (publicKeyPath.empty()) {
         showMessageN("ECDSA public key file save was cancelled.");
         return;
     }
 
     // Генерация ключей и сохранение их по выбранным путям
-    generateECDSAKeys(entropyData, privateKeyFile, publicKeyFile);
-    showMessageN("ECDSA keys have been successfully generated and saved.");
+    generateECDSAKeys(entropyData, privateKeyPath, publicKeyPath);
+
+    // Чтение приватного ключа
+    std::ifstream privateKeyIn(privateKeyPath);
+    if (!privateKeyIn) {
+        showMessageN("Error: Unable to read private key file.");
+        return;
+    }
+
+    std::string rawPrivateKey((std::istreambuf_iterator<char>(privateKeyIn)), std::istreambuf_iterator<char>());
+    privateKeyIn.close();
+
+    // Шифрование приватного ключа
+    std::vector<unsigned char> encryptedKey = aesEncrypt(rawPrivateKey, key, iv);
+
+    // Сохранение зашифрованного приватного ключа
+    std::ofstream privateKeyOut(privateKeyPath, std::ios::binary);
+    if (!privateKeyOut) {
+        showMessageN("Error saving encrypted private key.");
+        return;
+    }
+    privateKeyOut.write(reinterpret_cast<const char*>(encryptedKey.data()), encryptedKey.size());
+    privateKeyOut.close();
+
+    showMessageN("ECDSA keys have been successfully generated and the private key encrypted.");
+}
+void handleECDSAKeyDecryption(HWND hwnd) {
+    // Открываем диалоговое окно для выбора пути зашифрованного приватного ключа
+    std::string encryptedPrivateKeyPath = openFileDialog(hwnd, "Select Encrypted ECDSA Private Key");
+    if (encryptedPrivateKeyPath.empty()) {
+        showMessageN("Encrypted ECDSA private key file selection was cancelled.");
+        return;
+    }
+
+    std::string keyIvString;
+    // Передаем указатель на строку в диалог
+    if (DialogBoxParam(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG1), hwnd, DialogProc, (LPARAM)&keyIvString) != IDOK) {
+        MessageBox(hwnd, "Key and IV input cancelled.", "Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    // Разделяем строку на ключ и IV
+    size_t colonPos = keyIvString.find(':');
+    if (colonPos == std::string::npos) {
+        MessageBox(hwnd, "Invalid format. Please enter the key and IV separated by a colon.", "Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    std::string keyHex = keyIvString.substr(0, colonPos);
+    std::string ivHex = keyIvString.substr(colonPos + 1);
+
+    // Конвертируем HEX строки в массивы байтов
+    std::vector<unsigned char> key = hexStringToBytes(keyHex);
+    std::vector<unsigned char> iv = hexStringToBytes(ivHex);
+
+    // Чтение зашифрованного приватного ключа
+    std::ifstream encryptedPrivateKeyIn(encryptedPrivateKeyPath, std::ios::binary);
+    if (!encryptedPrivateKeyIn) {
+        showMessageN("Error: Unable to read encrypted private key file.");
+        return;
+    }
+
+    std::vector<unsigned char> encryptedKey((std::istreambuf_iterator<char>(encryptedPrivateKeyIn)), std::istreambuf_iterator<char>());
+    encryptedPrivateKeyIn.close();
+
+    // Расшифровка приватного ключа
+    std::string decryptedKey = aesDecrypt(encryptedKey, key, iv);
+    if (decryptedKey.empty()) {
+        showMessageN("Error: Decryption failed.");
+        return;
+    }
+
+    // Открываем диалоговое окно для выбора пути сохранения расшифрованного ключа
+    std::string decryptedKeyPath = saveFileDialog(hwnd, "Save Decrypted ECDSA Private Key", "ECDSA Private Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
+    if (decryptedKeyPath.empty()) {
+        showMessageN("Decrypted ECDSA private key file save was cancelled.");
+        return;
+    }
+
+    // Сохранение расшифрованного приватного ключа в выбранный файл
+    std::ofstream decryptedPrivateKeyOut(decryptedKeyPath, std::ios::trunc);
+    if (!decryptedPrivateKeyOut) {
+        showMessageN("Error saving decrypted private key.");
+        return;
+    }
+    decryptedPrivateKeyOut << decryptedKey;
+    decryptedPrivateKeyOut.close();
+
+    showMessageN("The private key has been successfully decrypted and saved to: " + decryptedKeyPath);
 }
 
 void handleRSACryptoDecryption(HWND hwnd) {
@@ -799,6 +913,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 case 10:
                     handleRSAKeyDecryption(hwnd);
                     break;
+                case 11: // Расшифровка ECDSA ключа
+                    handleECDSAKeyDecryption(hwnd);
+                    break;
 
                 case 0: // Выход
                     exit(0);
@@ -837,7 +954,7 @@ HWND createMainWindow(HINSTANCE hInstance) {
 
     HWND hwnd = CreateWindowEx(
             0, CLASS_NAME, "Cryptographic Operations Menu", WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT, CW_USEDEFAULT, 315, 550, nullptr, nullptr, hInstance, nullptr
+            CW_USEDEFAULT, CW_USEDEFAULT, 315, 600, nullptr, nullptr, hInstance, nullptr
     );
 
     if (hwnd == nullptr) {
@@ -863,8 +980,9 @@ void createButtons(HWND hwnd, HINSTANCE hInstance) {
     std::wstring btnText7 = utf8_to_utf16("AES Расшифрование");
     std::wstring btnText8 = utf8_to_utf16("ECDSA подписать");
     std::wstring btnText9 = utf8_to_utf16("ECDSA проверить подпись");
-    std::wstring btnText10 = utf8_to_utf16("Расшифровать ключ");
-    std::wstring btnText11 = utf8_to_utf16("Выход");
+    std::wstring btnText10 = utf8_to_utf16("Расшифровка priv_RSA");
+    std::wstring btnText11 = utf8_to_utf16("Расшифровка priv_ECDSA");
+    std::wstring btnText12 = utf8_to_utf16("Выход");
     // Создаем кнопки с использованием CreateWindowW
     CreateWindowW(L"BUTTON", btnText1.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
                   x, y, buttonWidth, buttonHeight, hwnd, (HMENU)1, hInstance, nullptr);
@@ -907,7 +1025,12 @@ void createButtons(HWND hwnd, HINSTANCE hInstance) {
 
     y += buttonHeight + spacing;
     CreateWindowW(L"BUTTON", btnText11.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)11, hInstance, nullptr);
+
+    y += buttonHeight + spacing;
+    CreateWindowW(L"BUTTON", btnText12.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
                   x, y, buttonWidth, buttonHeight, hwnd, (HMENU)0, hInstance, nullptr);
+
 }
 
 // Создание окна прогресса
