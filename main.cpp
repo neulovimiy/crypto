@@ -25,16 +25,36 @@
 #define IDC_BUTTON_DECRYPTION_PRIV_KEY 10
 std::string messageN;
 
+// Функция для преобразования строки UTF-8 в UTF-16
+std::wstring utf8_to_utf16(const std::string& utf8) {
+    if (utf8.empty()) return std::wstring();
+
+    // Вычисляем необходимый размер буфера для UTF-16
+    int utf16_length = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+    if (utf16_length == 0) {
+        return std::wstring();
+    }
+
+    // Выделяем буфер для UTF-16
+    std::vector<wchar_t> utf16_buffer(utf16_length);
+
+    // Преобразуем строку
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, utf16_buffer.data(), utf16_length);
+
+    return std::wstring(utf16_buffer.data());
+}
+
 // Функция для отображения сообщения
 void showMessageN(const std::string& message) {
-    // Преобразуем строку в юникод
-    std::wstring wmessage = std::wstring(message.begin(), message.end());
+    // Преобразуем строку из UTF-8 в UTF-16
+    std::wstring wmessage = utf8_to_utf16(message);
 
     // Используем MessageBoxW
     MessageBoxW(NULL, wmessage.c_str(), L"Info", MB_OK | MB_ICONINFORMATION);
 }
 
-const std::string CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+
 
 // Глобальная переменная для хранения процента прогресса
 int progressPercent = 0;
@@ -284,14 +304,6 @@ void handleRSAKeyDecryption(HWND hwnd) {
     std::cout << "Key (Hex): " << keyHex << "\n";
     std::cout << "IV (Hex): " << ivHex << "\n";
 
-    // Конвертация HEX-строк в байты
-    for (size_t i = 0; i < keyHex.length(); i += 2) {
-        key[i / 2] = std::stoi(keyHex.substr(i, 2), nullptr, 16);
-    }
-    for (size_t i = 0; i < ivHex.length(); i += 2) {
-        iv[i / 2] = std::stoi(ivHex.substr(i, 2), nullptr, 16);
-    }
-
     // Чтение зашифрованного приватного ключа
     std::ifstream encryptedPrivateKeyIn(encryptedPrivateKeyPath, std::ios::binary);
     if (!encryptedPrivateKeyIn) {
@@ -309,8 +321,15 @@ void handleRSAKeyDecryption(HWND hwnd) {
         return;
     }
 
-    // Сохранение расшифрованного приватного ключа в тот же файл
-    std::ofstream decryptedPrivateKeyOut(encryptedPrivateKeyPath, std::ios::trunc);
+    // Открываем диалоговое окно для выбора пути сохранения расшифрованного ключа
+    std::string decryptedKeyPath = saveFileDialog(hwnd, "Save Decrypted RSA Private Key", "RSA Private Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
+    if (decryptedKeyPath.empty()) {
+        showMessageN("Decrypted RSA private key file save was cancelled.");
+        return;
+    }
+
+    // Сохранение расшифрованного приватного ключа в выбранный файл
+    std::ofstream decryptedPrivateKeyOut(decryptedKeyPath, std::ios::trunc);
     if (!decryptedPrivateKeyOut) {
         showMessageN("Error saving decrypted private key.");
         return;
@@ -318,7 +337,7 @@ void handleRSAKeyDecryption(HWND hwnd) {
     decryptedPrivateKeyOut << decryptedKey;
     decryptedPrivateKeyOut.close();
 
-    showMessageN("The private key has been successfully decrypted.");
+    showMessageN("The private key has been successfully decrypted and saved to: " + decryptedKeyPath);
 }
 // Функция для проверки доступности USB-накопителя
 bool isUSBDriveAvailable(const std::string& driveLetter) {
@@ -346,6 +365,33 @@ std::vector<std::string> findAvailableUSBDrives() {
 
 
 void handleRSAKeyGeneration(HWND hwnd, const std::string& entropyData) {
+    // Открываем диалоговое окно для ввода ключа и IV
+    std::string keyIvString;
+    if (DialogBoxParam(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG1), hwnd, DialogProc, (LPARAM)&keyIvString) != IDOK) {
+        MessageBox(hwnd, "Key and IV input cancelled.", "Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    // Проверяем, что ключ и IV введены корректно
+    if (keyIvString.empty()) {
+        MessageBox(hwnd, "Key and IV cannot be empty.", "Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    // Разделяем строку на ключ и IV
+    size_t colonPos = keyIvString.find(':');
+    if (colonPos == std::string::npos) {
+        MessageBox(hwnd, "Invalid format. Please enter the key and IV separated by a colon.", "Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    std::string keyHex = keyIvString.substr(0, colonPos);
+    std::string ivHex = keyIvString.substr(colonPos + 1);
+
+    // Конвертируем HEX строки в массивы байтов
+    std::vector<unsigned char> key = hexStringToBytes(keyHex);
+    std::vector<unsigned char> iv = hexStringToBytes(ivHex);
+
     // Открываем диалоговое окно для выбора пути сохранения публичного ключа
     std::string publicKeyPath = saveFileDialog(hwnd, "Save RSA Public Key", "RSA Public Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
     if (publicKeyPath.empty()) {
@@ -363,46 +409,6 @@ void handleRSAKeyGeneration(HWND hwnd, const std::string& entropyData) {
     // Генерация ключей и сохранение их по выбранным путям
     generateRSAKeys(entropyData, publicKeyPath, privateKeyPath);
 
-    // Поиск доступного USB-накопителя
-    std::vector<std::string> availableDrives = findAvailableUSBDrives();
-    if (availableDrives.empty()) {
-        showMessageN("Error: No USB drive found.");
-        return;
-    }
-
-    // Используем первый найденный USB-накопитель
-    std::string usbDrive = availableDrives[0];
-    std::string keyFile = usbDrive + "\\key_and_iv.txt";
-
-    std::ifstream keyIn(keyFile);
-    if (!keyIn) {
-        showMessageN("Error: Unable to read key and IV from USB drive.");
-        return;
-    }
-
-    std::string keyAndIV;
-    std::getline(keyIn, keyAndIV);
-    keyIn.close();
-
-    size_t colonPos = keyAndIV.find(':');
-    if (colonPos == std::string::npos) {
-        showMessageN("Invalid key and IV format.");
-        return;
-    }
-
-    std::vector<unsigned char> key(32);
-    std::vector<unsigned char> iv(16);
-    std::string keyHex = keyAndIV.substr(0, colonPos);
-    std::string ivHex = keyAndIV.substr(colonPos + 1);
-
-    // Конвертация HEX-строк в байты
-    for (size_t i = 0; i < keyHex.length(); i += 2) {
-        key[i / 2] = std::stoi(keyHex.substr(i, 2), nullptr, 16);
-    }
-    for (size_t i = 0; i < ivHex.length(); i += 2) {
-        iv[i / 2] = std::stoi(ivHex.substr(i, 2), nullptr, 16);
-    }
-
     // Чтение приватного ключа
     std::ifstream privateKeyIn(privateKeyPath);
     if (!privateKeyIn) {
@@ -416,7 +422,7 @@ void handleRSAKeyGeneration(HWND hwnd, const std::string& entropyData) {
     // Шифрование приватного ключа
     std::vector<unsigned char> encryptedKey = aesEncrypt(rawPrivateKey, key, iv);
 
-    // Сохранение зашифрованного приватного ключа в тот же файл
+    // Сохранение зашифрованного приватного ключа
     std::ofstream privateKeyOut(privateKeyPath, std::ios::binary);
     if (!privateKeyOut) {
         showMessageN("Error saving encrypted private key.");
@@ -831,7 +837,7 @@ HWND createMainWindow(HINSTANCE hInstance) {
 
     HWND hwnd = CreateWindowEx(
             0, CLASS_NAME, "Cryptographic Operations Menu", WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT, CW_USEDEFAULT, 315, 510, nullptr, nullptr, hInstance, nullptr
+            CW_USEDEFAULT, CW_USEDEFAULT, 315, 550, nullptr, nullptr, hInstance, nullptr
     );
 
     if (hwnd == nullptr) {
@@ -848,49 +854,60 @@ void createButtons(HWND hwnd, HINSTANCE hInstance) {
     int x = 50; // Горизонтальная позиция кнопок
     int y = 50; // Начальная вертикальная позиция
     int spacing = 10; // Отступ между кнопками
-
-    CreateWindow("BUTTON", "Generate RSA Keys", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)1, hInstance, nullptr);
-
-    y += buttonHeight + spacing;
-    CreateWindow("BUTTON", "Generate AES Keys", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)2, hInstance, nullptr);
-
-    y += buttonHeight + spacing;
-    CreateWindow("BUTTON", "Generate ECDSA Keys", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)3, hInstance, nullptr);
-
-    y += buttonHeight + spacing;
-    CreateWindow("BUTTON", "RSA Encryption", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)4, hInstance, nullptr);
-
-    y += buttonHeight + spacing;
-    CreateWindow("BUTTON", "RSA Decryption", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)5, hInstance, nullptr);
+    std::wstring btnText1 = utf8_to_utf16("Генерация RSA ключей");
+    std::wstring btnText2 = utf8_to_utf16("Генерация AES ключа");
+    std::wstring btnText3 = utf8_to_utf16("Генерация ECDSA ключей");
+    std::wstring btnText4 = utf8_to_utf16("RSA Шифрование");
+    std::wstring btnText5 = utf8_to_utf16("RSA Расшифрование");
+    std::wstring btnText6 = utf8_to_utf16("AES Шифрование");
+    std::wstring btnText7 = utf8_to_utf16("AES Расшифрование");
+    std::wstring btnText8 = utf8_to_utf16("ECDSA подписать");
+    std::wstring btnText9 = utf8_to_utf16("ECDSA проверить подпись");
+    std::wstring btnText10 = utf8_to_utf16("Расшифровать ключ");
+    std::wstring btnText11 = utf8_to_utf16("Выход");
+    // Создаем кнопки с использованием CreateWindowW
+    CreateWindowW(L"BUTTON", btnText1.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)1, hInstance, nullptr);
 
     y += buttonHeight + spacing;
-    CreateWindow("BUTTON", "AES Encryption", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)6, hInstance, nullptr);
+    CreateWindowW(L"BUTTON", btnText2.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)2, hInstance, nullptr);
 
     y += buttonHeight + spacing;
-    CreateWindow("BUTTON", "AES Decryption", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)7, hInstance, nullptr);
+    CreateWindowW(L"BUTTON", btnText3.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)3, hInstance, nullptr);
 
     y += buttonHeight + spacing;
-    CreateWindow("BUTTON", "ECDSA Sign Message", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)8, hInstance, nullptr);
+    CreateWindowW(L"BUTTON", btnText4.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)4, hInstance, nullptr);
 
     y += buttonHeight + spacing;
-    CreateWindow("BUTTON", "ECDSA Verify Signature", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)9, hInstance, nullptr);
-    // Добавляем новую кнопку
-    y += buttonHeight + spacing;
-    CreateWindow("BUTTON", "Decryption priv_key", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)IDC_BUTTON_DECRYPTION_PRIV_KEY, hInstance, nullptr);
+    CreateWindowW(L"BUTTON", btnText5.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)5, hInstance, nullptr);
 
     y += buttonHeight + spacing;
-    CreateWindow("BUTTON", "Exit", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                 x, y, buttonWidth, buttonHeight, hwnd, (HMENU)0, hInstance, nullptr);
+    CreateWindowW(L"BUTTON", btnText6.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)6, hInstance, nullptr);
+
+    y += buttonHeight + spacing;
+    CreateWindowW(L"BUTTON", btnText7.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)7, hInstance, nullptr);
+
+    y += buttonHeight + spacing;
+    CreateWindowW(L"BUTTON", btnText8.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)8, hInstance, nullptr);
+
+    y += buttonHeight + spacing;
+    CreateWindowW(L"BUTTON", btnText9.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)9, hInstance, nullptr);
+
+    y += buttonHeight + spacing;
+    CreateWindowW(L"BUTTON", btnText10.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)IDC_BUTTON_DECRYPTION_PRIV_KEY, hInstance, nullptr);
+
+    y += buttonHeight + spacing;
+    CreateWindowW(L"BUTTON", btnText11.c_str(), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                  x, y, buttonWidth, buttonHeight, hwnd, (HMENU)0, hInstance, nullptr);
 }
 
 // Создание окна прогресса
@@ -947,7 +964,7 @@ std::string collectMouseEntropy(int maxDurationMs = 60000, int intervalMs = 10, 
     int movementCount = 0;
     auto start = GetTickCount();
 
-    showMessage("Move the mouse to collect entropy...");
+    showMessageN("Двигайте мишкой для сбора энтропии...");
 
     // Создаем окно прогресса
     HWND progressWindow = CreateProgressWindow(GetModuleHandle(NULL));
@@ -1126,7 +1143,8 @@ int main() {
     std::vector<std::string> usbDrives = findAvailableUSBDrives();
 
     if (usbDrives.empty()) {
-        std::cerr << "Ошибка: не найдено ни одного внешнего накопителя." << std::endl;
+        // Отображаем окно с ошибкой
+        showMessageN("Ошибка: не найдено ни одного внешнего накопителя.");
         return 1;
     }
 
