@@ -70,6 +70,12 @@ build CMakeFiles/EntropyRSA.dir/aes_generator.cpp.obj: CXX_COMPILER__EntropyRSA_
   OBJECT_DIR = CMakeFiles\EntropyRSA.dir
   OBJECT_FILE_DIR = CMakeFiles\EntropyRSA.dir
 
+build CMakeFiles/EntropyRSA.dir/resource.rc.obj: RC_COMPILER__EntropyRSA_unscanned_Debug C$:/Users/yaros/CLionProjects/crypto/resource.rc || cmake_object_order_depends_target_EntropyRSA
+  DEP_FILE = CMakeFiles\EntropyRSA.dir\resource.rc.obj.d
+  INCLUDES = -I "C:/Program Files/OpenSSL-Win64/include"
+  OBJECT_DIR = CMakeFiles\EntropyRSA.dir
+  OBJECT_FILE_DIR = CMakeFiles\EntropyRSA.dir
+
 build CMakeFiles/EntropyRSA.dir/C_/Program_Files/OpenSSL-Win64/include/openssl/applink.c.obj: C_COMPILER__EntropyRSA_unscanned_Debug C$:/Program$ Files/OpenSSL-Win64/include/openssl/applink.c || cmake_object_order_depends_target_EntropyRSA
   DEP_FILE = CMakeFiles\EntropyRSA.dir\C_\Program_Files\OpenSSL-Win64\include\openssl\applink.c.obj.d
   FLAGS = -g -fdiagnostics-color=always
@@ -92,7 +98,7 @@ build CMakeFiles/EntropyRSA.dir/ecc_ecdsa.cpp.obj: CXX_COMPILER__EntropyRSA_unsc
 #############################################
 # Link the executable EntropyRSA.exe
 
-build EntropyRSA.exe: CXX_EXECUTABLE_LINKER__EntropyRSA_Debug CMakeFiles/EntropyRSA.dir/main.cpp.obj CMakeFiles/EntropyRSA.dir/rsa_generator.cpp.obj CMakeFiles/EntropyRSA.dir/aes_generator.cpp.obj CMakeFiles/EntropyRSA.dir/C_/Program_Files/OpenSSL-Win64/include/openssl/applink.c.obj CMakeFiles/EntropyRSA.dir/ecc_ecdsa.cpp.obj | C$:/Program$ Files/OpenSSL-Win64/lib/VC/x64/MD/libssl.lib C$:/Program$ Files/OpenSSL-Win64/lib/VC/x64/MD/libcrypto.lib
+build EntropyRSA.exe: CXX_EXECUTABLE_LINKER__EntropyRSA_Debug CMakeFiles/EntropyRSA.dir/main.cpp.obj CMakeFiles/EntropyRSA.dir/rsa_generator.cpp.obj CMakeFiles/EntropyRSA.dir/aes_generator.cpp.obj CMakeFiles/EntropyRSA.dir/resource.rc.obj CMakeFiles/EntropyRSA.dir/C_/Program_Files/OpenSSL-Win64/include/openssl/applink.c.obj CMakeFiles/EntropyRSA.dir/ecc_ecdsa.cpp.obj | C$:/Program$ Files/OpenSSL-Win64/lib/VC/x64/MD/libssl.lib C$:/Program$ Files/OpenSSL-Win64/lib/VC/x64/MD/libcrypto.lib
   FLAGS = -g
   LINK_LIBRARIES = "C:/Program Files/OpenSSL-Win64/lib/VC/x64/MD/libssl.lib"  "C:/Program Files/OpenSSL-Win64/lib/VC/x64/MD/libcrypto.lib"  -luser32  -lgdi32  -lcomctl32  -ladvapi32  -lcrypt32  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
   OBJECT_DIR = CMakeFiles\EntropyRSA.dir

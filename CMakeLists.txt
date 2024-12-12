@@ -3,7 +3,7 @@ project(EntropyRSA VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 11)
 
-add_executable(EntropyRSA main.cpp rsa_generator.cpp aes_generator.cpp "C:/Program Files/OpenSSL-Win64/include/openssl/applink.c" ecc_ecdsa.cpp
+add_executable(EntropyRSA main.cpp rsa_generator.cpp aes_generator.cpp resource.rc "C:/Program Files/OpenSSL-Win64/include/openssl/applink.c" ecc_ecdsa.cpp
 )
 
 set(OPENSSL_INCLUDE_DIR "C:/Program Files/OpenSSL-Win64/include")

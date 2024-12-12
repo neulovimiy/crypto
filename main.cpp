@@ -17,46 +17,13 @@
 #include <openssl/pem.h>
 #include <openssl/err.h>
 #include <sstream>
+#include "resource.h"
 #pragma comment(lib, "advapi32.lib")
 #define IDC_EDIT_MESSAGE 101
 #define IDC_BUTTON_OK 102
 #define IDC_EDIT_PASSWORD 103
 #define IDC_BUTTON_DECRYPTION_PRIV_KEY 10
 std::string messageN;
-
-LRESULT CALLBACK MessageInputWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch (uMsg) {
-        case WM_CREATE: {
-            // Создание поля для ввода сообщения (многострочное поле)
-            CreateWindowEx(0, "EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL,
-                           50, 50, 300, 100, hwnd, (HMENU)IDC_EDIT_MESSAGE, GetModuleHandle(NULL), NULL);
-
-            // Создание кнопки "OK"
-            CreateWindow("BUTTON", "OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-                         150, 170, 100, 30, hwnd, (HMENU)IDC_BUTTON_OK, GetModuleHandle(NULL), NULL);
-            break;
-        }
-        case WM_COMMAND: {
-            if (LOWORD(wParam) == IDC_BUTTON_OK) {
-                // Получение текста из поля ввода, когда нажата кнопка "OK"
-                char buffer[1024];
-                HWND hEdit = GetDlgItem(hwnd, IDC_EDIT_MESSAGE);
-                GetWindowText(hEdit, buffer, sizeof(buffer));
-                messageN = buffer;  // Сохраняем введенное сообщение в глобальную переменную
-
-                // Закрытие окна после получения текста
-                PostMessage(hwnd, WM_CLOSE, 0, 0);
-            }
-            break;
-        }
-        case WM_DESTROY:
-            PostQuitMessage(0);
-            break;
-        default:
-            return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
-    return 0;
-}
 
 // Функция для отображения сообщения
 void showMessageN(const std::string& message) {
@@ -245,6 +212,139 @@ void handleRSACryptoEncryption(HWND hwnd) {
     showMessageN("The file has been successfully encrypted and saved to: " + outputFile);
 }
 
+// Функция для конвертации HEX строки в массив байтов
+std::vector<unsigned char> hexStringToBytes(const std::string& hex) {
+    std::vector<unsigned char> bytes;
+    for (size_t i = 0; i < hex.length(); i += 2) {
+        unsigned char byte = std::stoi(hex.substr(i, 2), nullptr, 16);
+        bytes.push_back(byte);
+    }
+    return bytes;
+}
+
+// Обработчик диалогового окна
+INT_PTR CALLBACK DialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    static std::string *keyIvString = nullptr;
+
+    switch (uMsg) {
+        case WM_INITDIALOG:
+            // Инициализация указателя на строку для keyIvString
+            keyIvString = (std::string*)lParam;
+            return TRUE;
+
+        case WM_COMMAND:
+            if (LOWORD(wParam) == IDOK) {
+                // Извлекаем текст из поля ввода
+                char keyIvBuffer[512];
+                GetDlgItemText(hwndDlg, IDC_KEY_IV, keyIvBuffer, sizeof(keyIvBuffer));
+                *keyIvString = keyIvBuffer; // Передаем строку целиком
+
+                EndDialog(hwndDlg, IDOK);
+                return TRUE;
+            }
+            break;
+
+        case WM_CLOSE:
+            EndDialog(hwndDlg, IDCANCEL);
+            return TRUE;
+    }
+    return FALSE;
+}
+
+void handleRSAKeyDecryption(HWND hwnd) {
+    // Открываем диалоговое окно для выбора пути зашифрованного приватного ключа
+    std::string encryptedPrivateKeyPath = openFileDialog(hwnd, "Select Encrypted RSA Private Key");
+    if (encryptedPrivateKeyPath.empty()) {
+        showMessageN("Encrypted RSA private key file selection was cancelled.");
+        return;
+    }
+
+    std::string keyIvString;
+    // Передаем указатель на строку в диалог
+    if (DialogBoxParam(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG1), hwnd, DialogProc, (LPARAM)&keyIvString) != IDOK) {
+        MessageBox(hwnd, "Key and IV input cancelled.", "Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    // Разделяем строку на ключ и IV
+    size_t colonPos = keyIvString.find(':');
+    if (colonPos == std::string::npos) {
+        MessageBox(hwnd, "Invalid format. Please enter the key and IV separated by a colon.", "Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    std::string keyHex = keyIvString.substr(0, colonPos);
+    std::string ivHex = keyIvString.substr(colonPos + 1);
+
+    // Конвертируем HEX строки в массивы байтов
+    std::vector<unsigned char> key = hexStringToBytes(keyHex);
+    std::vector<unsigned char> iv = hexStringToBytes(ivHex);
+
+    // Выводим для проверки
+    std::cout << "Key (Hex): " << keyHex << "\n";
+    std::cout << "IV (Hex): " << ivHex << "\n";
+
+    // Конвертация HEX-строк в байты
+    for (size_t i = 0; i < keyHex.length(); i += 2) {
+        key[i / 2] = std::stoi(keyHex.substr(i, 2), nullptr, 16);
+    }
+    for (size_t i = 0; i < ivHex.length(); i += 2) {
+        iv[i / 2] = std::stoi(ivHex.substr(i, 2), nullptr, 16);
+    }
+
+    // Чтение зашифрованного приватного ключа
+    std::ifstream encryptedPrivateKeyIn(encryptedPrivateKeyPath, std::ios::binary);
+    if (!encryptedPrivateKeyIn) {
+        showMessageN("Error: Unable to read encrypted private key file.");
+        return;
+    }
+
+    std::vector<unsigned char> encryptedKey((std::istreambuf_iterator<char>(encryptedPrivateKeyIn)), std::istreambuf_iterator<char>());
+    encryptedPrivateKeyIn.close();
+
+    // Расшифровка приватного ключа
+    std::string decryptedKey = aesDecrypt(encryptedKey, key, iv);
+    if (decryptedKey.empty()) {
+        showMessageN("Error: Decryption failed.");
+        return;
+    }
+
+    // Сохранение расшифрованного приватного ключа в тот же файл
+    std::ofstream decryptedPrivateKeyOut(encryptedPrivateKeyPath, std::ios::trunc);
+    if (!decryptedPrivateKeyOut) {
+        showMessageN("Error saving decrypted private key.");
+        return;
+    }
+    decryptedPrivateKeyOut << decryptedKey;
+    decryptedPrivateKeyOut.close();
+
+    showMessageN("The private key has been successfully decrypted.");
+}
+// Функция для проверки доступности USB-накопителя
+bool isUSBDriveAvailable(const std::string& driveLetter) {
+    std::string rootPath = driveLetter + "\\";
+    UINT driveType = GetDriveType(rootPath.c_str());
+
+    // Проверяем, является ли устройство съемным накопителем
+    return driveType == DRIVE_REMOVABLE;
+}
+// Функция для поиска всех доступных USB-накопителей
+std::vector<std::string> findAvailableUSBDrives() {
+    std::vector<std::string> availableDrives;
+    char driveLetter = 'A';
+
+    // Перебираем все возможные буквы дисков от A: до Z:
+    for (char driveLetter = 'A'; driveLetter <= 'Z'; ++driveLetter) {
+        std::string drivePath = std::string(1, driveLetter) + ":";
+        if (isUSBDriveAvailable(drivePath)) {
+            availableDrives.push_back(drivePath);
+        }
+    }
+
+    return availableDrives;
+}
+
+
 void handleRSAKeyGeneration(HWND hwnd, const std::string& entropyData) {
     // Открываем диалоговое окно для выбора пути сохранения публичного ключа
     std::string publicKeyPath = saveFileDialog(hwnd, "Save RSA Public Key", "RSA Public Key (*.pem)\0*.pem\0All Files (*.*)\0*.*\0");
@@ -262,7 +362,70 @@ void handleRSAKeyGeneration(HWND hwnd, const std::string& entropyData) {
 
     // Генерация ключей и сохранение их по выбранным путям
     generateRSAKeys(entropyData, publicKeyPath, privateKeyPath);
-    showMessageN("RSA keys have been successfully generated and saved.");
+
+    // Поиск доступного USB-накопителя
+    std::vector<std::string> availableDrives = findAvailableUSBDrives();
+    if (availableDrives.empty()) {
+        showMessageN("Error: No USB drive found.");
+        return;
+    }
+
+    // Используем первый найденный USB-накопитель
+    std::string usbDrive = availableDrives[0];
+    std::string keyFile = usbDrive + "\\key_and_iv.txt";
+
+    std::ifstream keyIn(keyFile);
+    if (!keyIn) {
+        showMessageN("Error: Unable to read key and IV from USB drive.");
+        return;
+    }
+
+    std::string keyAndIV;
+    std::getline(keyIn, keyAndIV);
+    keyIn.close();
+
+    size_t colonPos = keyAndIV.find(':');
+    if (colonPos == std::string::npos) {
+        showMessageN("Invalid key and IV format.");
+        return;
+    }
+
+    std::vector<unsigned char> key(32);
+    std::vector<unsigned char> iv(16);
+    std::string keyHex = keyAndIV.substr(0, colonPos);
+    std::string ivHex = keyAndIV.substr(colonPos + 1);
+
+    // Конвертация HEX-строк в байты
+    for (size_t i = 0; i < keyHex.length(); i += 2) {
+        key[i / 2] = std::stoi(keyHex.substr(i, 2), nullptr, 16);
+    }
+    for (size_t i = 0; i < ivHex.length(); i += 2) {
+        iv[i / 2] = std::stoi(ivHex.substr(i, 2), nullptr, 16);
+    }
+
+    // Чтение приватного ключа
+    std::ifstream privateKeyIn(privateKeyPath);
+    if (!privateKeyIn) {
+        showMessageN("Error: Unable to read private key file.");
+        return;
+    }
+
+    std::string rawPrivateKey((std::istreambuf_iterator<char>(privateKeyIn)), std::istreambuf_iterator<char>());
+    privateKeyIn.close();
+
+    // Шифрование приватного ключа
+    std::vector<unsigned char> encryptedKey = aesEncrypt(rawPrivateKey, key, iv);
+
+    // Сохранение зашифрованного приватного ключа в тот же файл
+    std::ofstream privateKeyOut(privateKeyPath, std::ios::binary);
+    if (!privateKeyOut) {
+        showMessageN("Error saving encrypted private key.");
+        return;
+    }
+    privateKeyOut.write(reinterpret_cast<const char*>(encryptedKey.data()), encryptedKey.size());
+    privateKeyOut.close();
+
+    showMessageN("RSA keys have been successfully generated and the private key encrypted.");
 }
 
 void handleAESKeyGeneration(HWND hwnd, const std::string& entropyData) {
@@ -593,56 +756,7 @@ void handleSignatureVerification(HWND hwnd) {
         showMessageN("The signature is invalid.");
     }
 }
-void handleDecryptionWithPrivateKey(HWND hwnd) {
-    std::string privateKeyFile;
-    std::string inputFile;
-    std::string outputFile;
 
-    privateKeyFile = openFileDialog(hwnd, "Select the RSA private key");
-    if (privateKeyFile.empty()) {
-        showMessageN("RSA private key file selection was cancelled.");
-        return;
-    }
-
-    inputFile = openFileDialog(hwnd, "Select the file to decrypt");
-    if (inputFile.empty()) {
-        showMessageN("Input file selection was cancelled.");
-        return;
-    }
-
-    outputFile = openFileDialog(hwnd, "Select the file to save the decrypted data");
-    if (outputFile.empty()) {
-        showMessageN("Output file selection was cancelled.");
-        return;
-    }
-
-    // Чтение зашифрованного содержимого файла
-    std::ifstream fileIn(inputFile, std::ios::binary);
-    if (!fileIn) {
-        showMessageN("Error opening input file.");
-        return;
-    }
-
-    std::vector<unsigned char> encryptedData((std::istreambuf_iterator<char>(fileIn)), std::istreambuf_iterator<char>());
-
-    // Расшифрование данных
-    std::vector<unsigned char> decryptedRSA = rsaDecryptFile(encryptedData, privateKeyFile);
-
-    // Запись расшифрованных данных в файл
-    std::ofstream outFile(outputFile, std::ios::binary);
-    if (!outFile) {
-        showMessageN("Error opening output file for writing.");
-        return;
-    }
-
-    outFile.write((char*)decryptedRSA.data(), decryptedRSA.size());
-    if (!outFile) {
-        showMessageN("Error writing to the output file.");
-        return;
-    }
-
-    showMessageN("The file has been successfully decrypted and saved to: " + outputFile);
-}
 // Функция для обработки сообщений окна
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     // Обработка команд (кнопок)
@@ -675,6 +789,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     break;
                 case 9: // Проверка подписи ECDSA
                     handleSignatureVerification(hwnd);
+                    break;
+                case 10:
+                    handleRSAKeyDecryption(hwnd);
                     break;
 
                 case 0: // Выход
@@ -983,14 +1100,6 @@ void showPassword(const std::string& password) {
         DispatchMessage(&msg);
     }
 }
-// Функция для проверки доступности USB-накопителя
-bool isUSBDriveAvailable(const std::string& driveLetter) {
-    std::string rootPath = driveLetter + "\\";
-    UINT driveType = GetDriveType(rootPath.c_str());
-
-    // Проверяем, является ли устройство съемным накопителем
-    return driveType == DRIVE_REMOVABLE;
-}
 
 int main() {
     // Установка кодировки консоли
@@ -1013,12 +1122,22 @@ int main() {
         if (progressPercent >= 100) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
     }
-    // Проверяем, подключен ли внешний накопитель
-    std::string usbDrive = "D:";
-    if (!isUSBDriveAvailable(usbDrive)) {
-        std::cerr << "Ошибка: внешний накопитель (" << usbDrive << ") не найден." << std::endl;
+    // Поиск всех доступных USB-накопителей
+    std::vector<std::string> usbDrives = findAvailableUSBDrives();
+
+    if (usbDrives.empty()) {
+        std::cerr << "Ошибка: не найдено ни одного внешнего накопителя." << std::endl;
         return 1;
     }
+
+    // Вывод найденных накопителей
+    std::cout << "Найдены следующие внешние накопители:" << std::endl;
+    for (const auto& drive : usbDrives) {
+        std::cout << drive << std::endl;
+    }
+
+    // Выбор первого найденного накопителя (или можно добавить логику для выбора конкретного)
+    std::string usbDrive = usbDrives[0];
     // Генерация AES-ключа и IV
     auto keyAndIVHex = generateKeyAndIV();
     if (keyAndIVHex.first.empty() || keyAndIVHex.second.empty()) {
